@@ -4,10 +4,8 @@ ROS2 port of the Reactive Driving Support system for convex non-holonomic robot 
 
 [![ROS2](https://img.shields.io/badge/ROS2-Humble-blue)](https://docs.ros.org/)
 
-## ⚠️ Branch Information
-
 - **`ros2-port`** (this branch) - Active ROS2 implementation  
-- **`crowdbot`/`master`** - Original ROS1 implementation from LASA
+- **`crowdbot`/`master`** - Original ROS1 implementation
 
 This is a complete ROS2 reimplementation. For the original ROS1 version, see the [upstream repository](https://github.com/epfl-lasa/rds).
 

@@ -1,8 +1,13 @@
+import os
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    rds_params = os.path.join(
+        get_package_share_directory('rds_ros2'), 'config', 'rds_node_params.yaml'
+    )
     # === RDS PIPELINE NODES ===
     
     # Transform publishers for RDS coordinate system
@@ -73,7 +78,8 @@ def generate_launch_description():
         package='rds_ros2',
         executable='rds_node',
         name='rds_node',
-        output='screen'
+        output='screen',
+        parameters=[rds_params]
     )
     
     # RDS command processor

@@ -8,11 +8,8 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rvo2_lib REQUIRED)
+find_package(SDL2 REQUIRED)
 
-
-include_directories(
-  include
-)
 
 add_library(${PROJECT_NAME}
   src/capsule.cpp
@@ -20,6 +17,8 @@ add_library(${PROJECT_NAME}
   src/rds_5.cpp
   src/rds_5_agent.cpp
   src/my_rvo.cpp
+  src/gui.cpp
+  src/window.cpp
 )
 
 target_include_directories(rds_core PUBLIC
@@ -29,9 +28,11 @@ target_include_directories(rds_core PUBLIC
 
 
 target_link_libraries(${PROJECT_NAME}
-  PRIVATE
+  PUBLIC
     rvo2_lib::rvo2_lib
+    SDL2::SDL2
 )
+
 
 install(TARGETS ${PROJECT_NAME}
   EXPORT export_${PROJECT_NAME}
@@ -44,8 +45,9 @@ install(DIRECTORY include/
   DESTINATION include
 )
 
-ament_export_targets(export_${PROJECT_NAME})
+
+ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies()
+ament_export_dependencies(rvo2_lib SDL2)
 
 ament_package()

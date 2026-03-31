@@ -1,0 +1,7 @@
+rds_node:
+  ros__parameters:
+    # Pedestrian tracking
+    enable_pedestrian_tracking: true
+    pedestrian_track_topic: "rds/input/pedestrian_tracks"
+    default_pedestrian_radius: 0.3   # [m] used when track.radius <= 0
+    pedestrian_timeout: 1.0          # [s] drop stale tracks older than this

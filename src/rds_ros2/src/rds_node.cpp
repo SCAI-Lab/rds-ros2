@@ -22,21 +22,47 @@ RDSNode::RDSNode()
     : Node("rds_node"),
       command_correct_previous_linear_(0.f),
       command_correct_previous_angular_(0.f),
-      call_counter_(0)
+      call_counter_(0),
+      last_pedestrian_update_(Clock::now())
 {
+    // Declare parameters
+    this->declare_parameter("enable_pedestrian_tracking", true);
+    this->declare_parameter("pedestrian_track_topic", std::string("rds/input/pedestrian_tracks"));
+    this->declare_parameter("default_pedestrian_radius", 0.3f);
+    this->declare_parameter("pedestrian_timeout", 1.0f);
+
+    // Read parameters
+    enable_pedestrian_tracking_ = this->get_parameter("enable_pedestrian_tracking").as_bool();
+    pedestrian_track_topic_ = this->get_parameter("pedestrian_track_topic").as_string();
+    default_pedestrian_radius_ = static_cast<float>(this->get_parameter("default_pedestrian_radius").as_double());
+    pedestrian_timeout_ = static_cast<float>(this->get_parameter("pedestrian_timeout").as_double());
+
     // Initialize TF2 components
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
     // Create subscriptions
     subscriber_lidar_points_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-        "rds/input/filtered/points", 
-        rclcpp::QoS(1), 
+        "rds/input/filtered/points",
+        rclcpp::QoS(1),
         std::bind(&RDSNode::callbackLidarPoints, this, std::placeholders::_1));
+
+    if (enable_pedestrian_tracking_)
+    {
+        subscriber_pedestrian_tracks_ = this->create_subscription<rds_msgs::msg::PedestrianTracks>(
+            pedestrian_track_topic_,
+            rclcpp::QoS(1),
+            std::bind(&RDSNode::callbackPedestrianTracks, this, std::placeholders::_1));
+        RCLCPP_INFO(this->get_logger(), "Pedestrian tracking enabled on topic: %s", pedestrian_track_topic_.c_str());
+    }
+    else
+    {
+        RCLCPP_INFO(this->get_logger(), "Pedestrian tracking disabled");
+    }
 
     // Create publisher
     publisher_for_gui_ = this->create_publisher<rds_msgs::msg::ToGui>(
-        "rds_to_gui", 
+        "rds_to_gui",
         rclcpp::QoS(1));
 
     // Create service
@@ -64,6 +90,21 @@ void RDSNode::commandCorrectionService(
             moving_object.circle.center = obstacle_points_[i];
             lrf_moving_objects.push_back(moving_object);
             all_moving_objects.push_back(moving_object);
+        }
+    }
+
+    if (enable_pedestrian_tracking_)
+    {
+        float age = std::chrono::duration<float>(Clock::now() - last_pedestrian_update_).count();
+        if (age <= pedestrian_timeout_)
+        {
+            for (const auto& ped : pedestrian_objects_)
+                all_moving_objects.push_back(ped);
+        }
+        else if (!pedestrian_objects_.empty())
+        {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                "Pedestrian tracks stale (%.2fs > %.2fs timeout), ignoring", age, pedestrian_timeout_);
         }
     }
 
@@ -116,6 +157,12 @@ void RDSNode::commandCorrectionService(
     {
         rds_5.computeCorrectedVelocity(robot_shape, v_nominal_p_ref, v_previous_command,
             std::vector<MovingCircle>(), all_moving_objects, &v_corrected_p_ref);
+    }
+    catch (Geometry2D::Vec2::NormalizationException&)
+    {
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+            "NormalizationException: obstacle too close to robot, applying emergency brake");
+        v_corrected_p_ref = Vec2(0.f, 0.f);
     }
     catch (Geometry2D::DistanceMinimizer::InfeasibilityException& e)
     {
@@ -209,7 +256,21 @@ void RDSNode::commandCorrectionService(
     publisher_for_gui_->publish(*msg_to_gui);
 }
 
-void RDSNode::callbackLidarPoints(const sensor_msgs::msg::PointCloud2::SharedPtr points_msg) 
+void RDSNode::callbackPedestrianTracks(const rds_msgs::msg::PedestrianTracks::SharedPtr msg)
+{
+    pedestrian_objects_.clear();
+    for (const auto& track : msg->tracks)
+    {
+        MovingCircle ped;
+        ped.circle.center = Vec2(track.x, track.y);
+        ped.circle.radius = (track.radius > 0.f) ? track.radius : default_pedestrian_radius_;
+        ped.velocity = Vec2(track.vx, track.vy);
+        pedestrian_objects_.push_back(ped);
+    }
+    last_pedestrian_update_ = Clock::now();
+}
+
+void RDSNode::callbackLidarPoints(const sensor_msgs::msg::PointCloud2::SharedPtr points_msg)
 {
     // Convert PointCloud2 to PCL format
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
@@ -251,249 +312,3 @@ int main(int argc, char** argv)
 }
 
 
-// #include "rds_ros2/rds_node.hpp"
-
-// #include <rds/capsule.hpp>
-// #include <rds/config_rds_5.hpp>
-// #include <rds/distance_minimizer.hpp>
-
-// #include <rds_msgs/msg/half_plane2_d.hpp>
-// #include <rds_msgs/msg/point2_d.hpp>
-// #include <rds_msgs/msg/circle.hpp>
-
-// #include <geometry_msgs/msg/transform_stamped.hpp>
-// #include <pcl_conversions/pcl_conversions.h>
-
-// #define _USE_MATH_DEFINES
-// #include <cmath>
-
-// using Geometry2D::Vec2;
-// using Geometry2D::Capsule;
-// using AdditionalPrimitives2D::Circle;
-
-// RDSNode::RDSNode()
-//     : Node("rds_node"),
-//       command_correct_previous_linear_(0.f),
-//       command_correct_previous_angular_(0.f),
-//       call_counter_(0)
-// {
-//     // Initialize TF2 components
-//     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
-//     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-
-//     // Create subscriptions
-//     subscriber_lidar_points_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-//         "rds/input/filtered/points", 
-//         rclcpp::QoS(1), 
-//         std::bind(&RDSNode::callbackLidarPoints, this, std::placeholders::_1));
-
-//     // Create publisher
-//     publisher_for_gui_ = this->create_publisher<rds_msgs::msg::ToGui>(
-//         "rds_to_gui", 
-//         rclcpp::QoS(1));
-
-//     // Create service
-//     command_correction_server_ = this->create_service<rds_msgs::srv::VelocityCommandCorrectionRDS>(
-//         "rds_velocity_command_correction",
-//         std::bind(&RDSNode::commandCorrectionService, this, std::placeholders::_1, std::placeholders::_2));
-
-//     RCLCPP_INFO(this->get_logger(), "RDS Node initialized");
-// }
-
-// void RDSNode::commandCorrectionService(
-//     const std::shared_ptr<rds_msgs::srv::VelocityCommandCorrectionRDS::Request> request,
-//     std::shared_ptr<rds_msgs::srv::VelocityCommandCorrectionRDS::Response> response)
-// {
-//     RCLCPP_INFO(this->get_logger(), "=== RDS Service Call Started ===");
-//     RCLCPP_INFO(this->get_logger(), "Input: linear=%f, angular=%f", 
-//                request->nominal_command.linear, request->nominal_command.angular);
-    
-//     // prepare pedestrian tracks/ scan points retrieved from recent messages
-//     std::vector<MovingCircle> lrf_moving_objects;
-//     std::vector<MovingCircle> all_moving_objects;
-//     // Force disable obstacles
-//     RCLCPP_INFO(this->get_logger(), "Obstacles disabled - using %zu obstacles", all_moving_objects.size());
-
-//     // parse service parameters
-//     RCLCPP_INFO(this->get_logger(), "Parsing parameters...");
-//     float a_v_min = command_correct_previous_linear_ - request->dt * request->acc_limit_linear_abs_max;
-//     float a_v_max = command_correct_previous_linear_ + request->dt * request->acc_limit_linear_abs_max;
-//     float a_w_min = command_correct_previous_angular_ - request->dt * request->acc_limit_angular_abs_max;
-//     float a_w_max = command_correct_previous_angular_ + request->dt * request->acc_limit_angular_abs_max;
-//     VWBox vw_box_limits(a_v_min, a_v_max, a_w_min, a_w_max);
-//     RCLCPP_INFO(this->get_logger(), "VW box: v=[%f,%f], w=[%f,%f]", a_v_min, a_v_max, a_w_min, a_w_max);
-
-//     VWDiamond vw_diamond_limits(request->vel_lim_linear_min, request->vel_lim_linear_max,
-//         request->vel_lim_angular_abs_max, request->vel_linear_at_angular_abs_max);
-
-//     const RDS5CapsuleConfiguration rds_5_config = ConfigRDS5::ConfigWrap(request->dt).rds_5_config;
-
-//     float tau = request->rds_tau;
-//     float delta = request->rds_delta;
-//     float y_p_ref = request->reference_point_y;
-    
-//     RCLCPP_INFO(this->get_logger(), "RDS params: tau=%f, delta=%f, y_p_ref=%f", tau, delta, y_p_ref);
-
-//     RCLCPP_INFO(this->get_logger(), "Creating RDS5 object...");
-//     Geometry2D::RDS5 rds_5(tau, delta, y_p_ref, vw_box_limits, vw_diamond_limits);
-//     RCLCPP_INFO(this->get_logger(), "RDS5 object created successfully");
-
-//     rds_5.use_conservative_shift = false;
-//     rds_5.keep_origin_feasible = false;
-//     rds_5.no_VO_shift_at_contact = false;
-//     rds_5.shift_reduction_range = 0.35f;
-//     rds_5.ORCA_implementation = request->orca_implementation;
-//     rds_5.ORCA_use_p_ref = true;
-//     rds_5.ORCA_solver = true;
-
-//     float capsule_radius = request->capsule_radius;
-//     float capsule_center_front_y = request->capsule_center_front_y;
-//     float capsule_center_rear_y = request->capsule_center_rear_y;
-    
-//     RCLCPP_INFO(this->get_logger(), "Capsule: radius=%f, front_y=%f, rear_y=%f", 
-//                capsule_radius, capsule_center_front_y, capsule_center_rear_y);
-
-//     RCLCPP_INFO(this->get_logger(), "Creating robot shape...");
-//     Capsule robot_shape(capsule_radius, Vec2(0.0, capsule_center_front_y),
-//         Vec2(0.0, capsule_center_rear_y));
-//     RCLCPP_INFO(this->get_logger(), "Robot shape created successfully");
-
-//     Vec2 v_nominal_p_ref(-y_p_ref * request->nominal_command.angular,
-//         request->nominal_command.linear);
-//     RCLCPP_INFO(this->get_logger(), "v_nominal_p_ref: [%f, %f]", v_nominal_p_ref.x, v_nominal_p_ref.y);
-
-//     Vec2 v_previous_command(-command_correct_previous_angular_ * y_p_ref,
-//         command_correct_previous_linear_);
-//     RCLCPP_INFO(this->get_logger(), "v_previous_command: [%f, %f]", v_previous_command.x, v_previous_command.y);
-
-//     Vec2 v_corrected_p_ref(0.f, 0.f);
-
-//     if (v_nominal_p_ref.norm() > std::abs(vw_diamond_limits.v_max))
-//         v_nominal_p_ref = v_nominal_p_ref.normalized() * std::abs(vw_diamond_limits.v_max);
-
-//     // compute collision avoidance command
-//     RCLCPP_INFO(this->get_logger(), "About to call computeCorrectedVelocity...");
-//     try
-//     {
-//         rds_5.computeCorrectedVelocity(robot_shape, v_nominal_p_ref, v_previous_command,
-//             std::vector<MovingCircle>(), all_moving_objects, &v_corrected_p_ref);
-//         RCLCPP_INFO(this->get_logger(), "computeCorrectedVelocity completed successfully");
-//     }
-//     catch (const std::exception& e)
-//     {
-//         RCLCPP_ERROR(this->get_logger(), "Exception in computeCorrectedVelocity: %s", e.what());
-//         RCLCPP_ERROR(this->get_logger(), "Exception type: %s", typeid(e).name());
-        
-//         // Set to zero and return
-//         response->corrected_command.linear = 0.0;
-//         response->corrected_command.angular = 0.0;
-//         response->call_counter = ++call_counter_;
-//         return;
-//     }
-
-//     // Rest of the function...
-//     response->corrected_command.linear = v_corrected_p_ref.y;
-//     response->corrected_command.angular = -1.0 / y_p_ref * v_corrected_p_ref.x;
-    
-//     command_correct_previous_linear_ = response->corrected_command.linear;
-//     command_correct_previous_angular_ = response->corrected_command.angular;
-//     call_counter_++;
-//     response->call_counter = call_counter_;
-    
-//     RCLCPP_INFO(this->get_logger(), "=== RDS Service Call Completed ===");
-// }
-
-
-// void RDSNode::callbackLidarPoints(const sensor_msgs::msg::PointCloud2::SharedPtr points_msg) 
-// {
-//     // Convert PointCloud2 to PCL format
-//     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
-//     pcl::fromROSMsg(*points_msg, *cloud);
-
-//     // Transform the cloud to "rds_frame"
-//     sensor_msgs::msg::PointCloud2 cloud_out;
-//     try 
-//     {
-//         tf_buffer_->transform(*points_msg, cloud_out, "rds_frame", 
-//                              tf2::durationFromSec(1.0));
-//         pcl::fromROSMsg(cloud_out, *cloud);
-//     } 
-//     catch (tf2::TransformException &ex) 
-//     {
-//         RCLCPP_WARN(this->get_logger(), 
-//                    "%s exception, when looking up tf from %s to rds_frame", 
-//                    ex.what(), points_msg->header.frame_id.c_str());
-//         return;
-//     }
-
-//     // Clear the current points and add with ultra-aggressive filtering
-//     obstacle_points_.clear();
-    
-//     // Ultra-aggressive filtering to prevent collinearity
-//     const float MIN_DISTANCE = 1.0f;  // 1 meter minimum distance between points
-//     const float MAX_POINTS = 8;       // Maximum 8 points total
-//     const float MIN_ANGLE_DIFF = 0.5f; // Minimum angle difference (radians)
-    
-//     for (size_t i = 0; i < cloud->points.size() && obstacle_points_.size() < MAX_POINTS; i += 20) {  // Take every 20th point
-//         const auto& pt = cloud->points[i];
-        
-//         // Skip invalid points
-//         if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) {
-//             continue;
-//         }
-        
-//         Vec2 new_point(pt.x, pt.y);
-        
-//         // Skip points too close to origin (robot)
-//         if (new_point.norm() < 0.5f) {
-//             continue;
-//         }
-        
-//         bool should_add = true;
-        
-//         // Check minimum distance to existing points
-//         for (const auto& existing : obstacle_points_) {
-//             if ((new_point - existing).norm() < MIN_DISTANCE) {
-//                 should_add = false;
-//                 break;
-//             }
-//         }
-        
-//         // Check angular separation to avoid collinearity
-//         if (should_add && obstacle_points_.size() >= 2) {
-//             for (size_t j = 0; j < obstacle_points_.size() - 1; j++) {
-//                 Vec2 v1 = obstacle_points_[j];
-//                 Vec2 v2 = obstacle_points_[j + 1];
-//                 Vec2 v3 = new_point;
-                
-//                 // Calculate angles from origin
-//                 float angle1 = atan2(v1.y, v1.x);
-//                 float angle2 = atan2(v2.y, v2.x);
-//                 float angle3 = atan2(v3.y, v3.x);
-                
-//                 // Check if angles are too close (would create collinearity)
-//                 if (std::abs(angle3 - angle1) < MIN_ANGLE_DIFF || 
-//                     std::abs(angle3 - angle2) < MIN_ANGLE_DIFF) {
-//                     should_add = false;
-//                     break;
-//                 }
-//             }
-//         }
-        
-//         if (should_add) {
-//             obstacle_points_.push_back(new_point);
-//         }
-//     }
-    
-//     RCLCPP_INFO(this->get_logger(), "Ultra-filtered obstacle points: %zu from %zu", 
-//                 obstacle_points_.size(), cloud->points.size());
-// }
-
-// int main(int argc, char** argv)
-// {
-//     rclcpp::init(argc, argv);
-//     auto node = std::make_shared<RDSNode>();
-//     rclcpp::spin(node);
-//     rclcpp::shutdown();
-//     return 0;
-// }

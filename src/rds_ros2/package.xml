@@ -26,6 +26,7 @@
   <depend>libpcl-all-dev</depend>
   <depend>laser_geometry</depend>
   <depend>message_filters</depend>
+  <depend>ament_index_cpp</depend>
 
   <exec_depend>ira_laser_tools</exec_depend>
 

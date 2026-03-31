@@ -10,6 +10,7 @@ endif()
 
 # Find all dependencies
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -47,6 +48,7 @@ ament_target_dependencies(wrapper_base
   rclcpp
   geometry_msgs
   rds_msgs
+  ament_index_cpp
 )
 
 # ========================================
@@ -125,7 +127,6 @@ ament_target_dependencies(simple_obstacle_avoidance
   rclcpp 
   geometry_msgs 
   sensor_msgs 
-  PCL 
   pcl_conversions
 )
 
@@ -176,6 +177,11 @@ install(PROGRAMS
   scripts/improved_fake_laser_publisher.py
   scripts/velocity_visualizer.py
   scripts/test_velocity_commander.py
+  scripts/rds_client_ros_node.py
+  scripts/trajectory_command_node.py
+  scripts/rds_visualization.py
+  scripts/fake_pedestrian_publisher.py
+  scripts/keyboard_teleop.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

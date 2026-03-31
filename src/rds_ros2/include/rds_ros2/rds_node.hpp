@@ -6,6 +6,7 @@
 
 #include <rds_msgs/srv/velocity_command_correction_rds.hpp>
 #include <rds_msgs/msg/to_gui.hpp>
+#include <rds_msgs/msg/pedestrian_tracks.hpp>
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -23,6 +24,9 @@
 #include <memory>
 #include <chrono>
 
+using Clock = std::chrono::steady_clock;
+using TimePoint = std::chrono::time_point<Clock>;
+
 class RDSNode : public rclcpp::Node
 {
 public:
@@ -36,22 +40,32 @@ private:
 
     // Topic subscriptions
     void callbackLidarPoints(const sensor_msgs::msg::PointCloud2::SharedPtr points_msg);
+    void callbackPedestrianTracks(const rds_msgs::msg::PedestrianTracks::SharedPtr msg);
 
     // Service server and publisher
     rclcpp::Service<rds_msgs::srv::VelocityCommandCorrectionRDS>::SharedPtr command_correction_server_;
     rclcpp::Publisher<rds_msgs::msg::ToGui>::SharedPtr publisher_for_gui_;
     
-    // Subscription
+    // Subscriptions
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscriber_lidar_points_;
+    rclcpp::Subscription<rds_msgs::msg::PedestrianTracks>::SharedPtr subscriber_pedestrian_tracks_;
 
     // TF handling
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
+    // Parameters
+    bool enable_pedestrian_tracking_;
+    std::string pedestrian_track_topic_;
+    float default_pedestrian_radius_;
+    float pedestrian_timeout_;
+
     // Data storage
     std::vector<Geometry2D::Vec2> obstacle_points_;
+    std::vector<MovingCircle> pedestrian_objects_;
     float command_correct_previous_linear_, command_correct_previous_angular_;
     unsigned int call_counter_;
+    TimePoint last_pedestrian_update_;
 };
 
 #endif

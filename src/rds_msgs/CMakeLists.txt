@@ -14,6 +14,8 @@ set(msg_files
   "msg/Circle.msg"
   "msg/Capsule.msg"
   "msg/ToGui.msg"
+  "msg/PedestrianTrack.msg"
+  "msg/PedestrianTracks.msg"
 )
 
 # Service files

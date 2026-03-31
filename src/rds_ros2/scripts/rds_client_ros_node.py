@@ -41,7 +41,7 @@ class RDSVelocityModulator(Node):
         self.vel_linear_at_angular_abs_max = 0.2
         self.acc_limit_linear_abs_max = 3.0
         self.acc_limit_angular_abs_max = 3.0
-        self.dt = 0.01
+        self.dt = 0.1
         self.lrf_point_obstacles = True
         self.ORCA_implementation = False
         
